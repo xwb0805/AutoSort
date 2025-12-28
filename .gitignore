@@ -1,0 +1,57 @@
+# Build directories
+build/
+release/
+singlefile/
+*.o
+*.exe
+*.dll
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Qt
+*.autosave
+*.user
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.pro.user
+*.qmlc
+*.jsc
+
+# Android
+android_autosort/.gradle/
+android_autosort/.idea/
+android_autosort/app/build/
+android_autosort/build/
+android_autosort/*.iml
+android_autosort/local.properties
+android_autosort/.DS_Store
+android_autosort/app/*.iml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup

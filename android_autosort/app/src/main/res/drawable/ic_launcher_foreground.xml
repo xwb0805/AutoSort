@@ -1,0 +1,54 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+  <group
+      android:scaleX="0.58"
+      android:scaleY="0.58"
+      android:translateX="22.68"
+      android:translateY="22.68">
+      
+      <!-- Main folder -->
+      <path
+          android:fillColor="#FFFFFF"
+          android:pathData="M20,16L40,16L40,24L20,24Z"
+          android:fillAlpha="0.95"/>
+      <path
+          android:fillColor="#FFFFFF"
+          android:pathData="M12,24L68,24L68,64L12,64L12,24Z"
+          android:fillAlpha="0.95"/>
+      
+      <!-- File 1 (top left) -->
+      <path
+          android:fillColor="#6366F1"
+          android:pathData="M28,32L32,32L32,36L28,36Z"
+          android:fillAlpha="0.9"/>
+      <path
+          android:fillColor="#6366F1"
+          android:pathData="M36,32L52,32L52,36L36,36Z"
+          android:fillAlpha="0.9"/>
+      <path
+          android:fillColor="#6366F1"
+          android:pathData="M28,40L52,40L52,44L28,44Z"
+          android:fillAlpha="0.9"/>
+      <path
+          android:fillColor="#6366F1"
+          android:pathData="M28,48L44,48L44,52L28,52Z"
+          android:fillAlpha="0.9"/>
+      
+      <!-- Arrow -->
+      <path
+          android:fillColor="#10B981"
+          android:pathData="M44,28L60,28L60,32L44,32Z"
+          android:fillAlpha="0.95"/>
+      <path
+          android:fillColor="#10B981"
+          android:pathData="M50,24L50,36L46,32L46,28L50,24Z"
+          android:fillAlpha="0.95"/>
+      <path
+          android:fillColor="#10B981"
+          android:pathData="M60,24L60,36L64,32L64,28L60,24Z"
+          android:fillAlpha="0.95"/>
+  </group>
+</vector>
