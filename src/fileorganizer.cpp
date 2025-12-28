@@ -38,6 +38,9 @@ FileOrganizer::FileOrganizer(QObject *parent)
 
     initializeDefaultRules();
 
+    // 加载排除扩展名列表
+    loadExcludedExtensions();
+
     // 优先从项目目录加载 rules.json
     QString projectRulesPath = QCoreApplication::applicationDirPath() + "/rules.json";
     if (QFile::exists(projectRulesPath)) {
@@ -505,6 +508,12 @@ int FileOrganizer::organizeFiles()
         }
 
         QString extension = getFileExtension(fileName);
+
+        // 检查是否在排除列表中
+        if (!extension.isEmpty() && isExcludedExtension(extension)) {
+            qDebug() << "Skipping excluded extension:" << fileName;
+            continue;
+        }
         QString targetFolder;
 
         if (extension.isEmpty()) {
@@ -673,4 +682,108 @@ bool FileOrganizer::isExtensionFolder(const QString &folderName) const
         }
     }
     return false;
+}
+
+// 排除扩展名相关方法实现
+
+void FileOrganizer::addExcludedExtension(const QString &extension)
+{
+    QString ext = extension.toLower().trimmed();
+    if (ext.startsWith(".")) {
+        ext = ext.mid(1);
+    }
+    if (!ext.isEmpty() && !m_excludedExtensions.contains(ext)) {
+        m_excludedExtensions.append(ext);
+        m_excludedExtensions.sort();
+        saveExcludedExtensions();
+    }
+}
+
+void FileOrganizer::removeExcludedExtension(const QString &extension)
+{
+    QString ext = extension.toLower().trimmed();
+    if (ext.startsWith(".")) {
+        ext = ext.mid(1);
+    }
+    m_excludedExtensions.removeAll(ext);
+    m_excludedExtensions.sort();
+    saveExcludedExtensions();
+}
+
+QStringList FileOrganizer::excludedExtensions() const
+{
+    return m_excludedExtensions;
+}
+
+void FileOrganizer::loadExcludedExtensions()
+{
+    QString settingsPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(settingsPath);
+    settingsPath += "/config.json";
+
+    QFile file(settingsPath);
+    if (!file.exists()) {
+        return; // 如果文件不存在，使用空列表
+    }
+
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "Cannot open config file:" << settingsPath;
+        return;
+    }
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isNull() || !doc.isObject()) {
+        qWarning() << "Invalid config file format";
+        return;
+    }
+
+    QJsonObject obj = doc.object();
+    QJsonArray excludedArray = obj.value("excluded_extensions").toArray();
+
+    m_excludedExtensions.clear();
+    for (const QJsonValue &value : excludedArray) {
+        QString ext = value.toString().toLower().trimmed();
+        if (!ext.isEmpty()) {
+            m_excludedExtensions.append(ext);
+        }
+    }
+
+    m_excludedExtensions.sort();
+    qDebug() << "Loaded" << m_excludedExtensions.size() << "excluded extensions";
+}
+
+void FileOrganizer::saveExcludedExtensions()
+{
+    QString settingsPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(settingsPath);
+    settingsPath += "/config.json";
+
+    QJsonObject mainObj;
+
+    // 保存排除扩展名列表
+    QJsonArray excludedArray;
+    for (const QString &ext : m_excludedExtensions) {
+        excludedArray.append(ext);
+    }
+    mainObj["excluded_extensions"] = excludedArray;
+
+    QJsonDocument doc(mainObj);
+
+    QFile file(settingsPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qWarning() << "Cannot write config file:" << settingsPath;
+        return;
+    }
+
+    file.write(doc.toJson());
+    file.close();
+}
+
+bool FileOrganizer::isExcludedExtension(const QString &extension) const
+{
+    QString ext = extension.toLower();
+    return m_excludedExtensions.contains(ext);
 }

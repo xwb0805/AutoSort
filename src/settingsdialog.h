@@ -40,15 +40,19 @@ private slots:
     void importRules();
     void exportRules();
     void onRuleCellChanged(int row, int column);
+    void addExcludedExtension();
+    void removeExcludedExtension();
     void accept() override;
 
 private:
     void setupUI();
     void setupGeneralTab();
     void setupRulesTab();
+    void setupExcludedTab();
     void loadSettings();
     void saveSettings();
     void updateRuleTable();
+    void updateExcludedTable();
     bool validateSettings();
 
     QVBoxLayout *m_mainLayout;
@@ -76,7 +80,13 @@ private:
     QPushButton *m_importRulesButton;
     QPushButton *m_exportRulesButton;
 
+    QWidget *m_excludedTab;
+    QTableWidget *m_excludedTable;
+    QPushButton *m_addExcludedButton;
+    QPushButton *m_removeExcludedButton;
+
     QMap<QString, QString> m_customRules;
+    QStringList m_excludedExtensions;
     bool m_settingsChanged;
     FileOrganizer *m_fileOrganizer;
 };

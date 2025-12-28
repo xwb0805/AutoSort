@@ -37,6 +37,13 @@ public:
     void initializeDefaultRules();
     QMap<QString, QString> defaultRules() const;
 
+    // 排除扩展名相关方法
+    void addExcludedExtension(const QString &extension);
+    void removeExcludedExtension(const QString &extension);
+    QStringList excludedExtensions() const;
+    void loadExcludedExtensions();
+    void saveExcludedExtensions();
+
 signals:
     void organizationCompleted(int count);
     void monitoringStarted();
@@ -56,6 +63,7 @@ private:
     bool isFileLocked(const QString &filePath) const;
     bool isTemporaryFile(const QString &fileName) const;
     bool isExtensionFolder(const QString &folderName) const;
+    bool isExcludedExtension(const QString &extension) const;
 
     QFileSystemWatcher *m_watcher;
     QTimer *m_organizationTimer;
@@ -63,6 +71,7 @@ private:
     bool m_isMonitoring;
     QMap<QString, QString> m_extensionRules;
     QStringList m_temporaryExtensions;
+    QStringList m_excludedExtensions;
 };
 
 #endif // FILEORGANIZER_H

@@ -47,6 +47,10 @@ SettingsDialog::SettingsDialog(QWidget *parent, FileOrganizer *fileOrganizer)
     , m_resetRulesButton(nullptr)
     , m_importRulesButton(nullptr)
     , m_exportRulesButton(nullptr)
+    , m_excludedTab(nullptr)
+    , m_excludedTable(nullptr)
+    , m_addExcludedButton(nullptr)
+    , m_removeExcludedButton(nullptr)
     , m_settingsChanged(false)
 {
     setupUI();
@@ -66,6 +70,7 @@ void SettingsDialog::setupUI()
     m_tabWidget = new QTabWidget(this);
     setupGeneralTab();
     setupRulesTab();
+    setupExcludedTab();
 
     m_mainLayout->addWidget(m_tabWidget);
 
@@ -194,6 +199,45 @@ void SettingsDialog::setupRulesTab()
     connect(m_rulesTable, &QTableWidget::cellChanged, this, &SettingsDialog::onRuleCellChanged);
 }
 
+void SettingsDialog::setupExcludedTab()
+{
+    m_excludedTab = new QWidget();
+    QVBoxLayout *layout = new QVBoxLayout(m_excludedTab);
+
+    QGroupBox *excludedGroup = new QGroupBox("排除扩展名（这些扩展名的文件不会被整理）", m_excludedTab);
+    QVBoxLayout *excludedLayout = new QVBoxLayout(excludedGroup);
+
+    QLabel *hintLabel = new QLabel("添加到这里的文件扩展名将不会被移动到任何文件夹。", m_excludedTab);
+    hintLabel->setStyleSheet("color: gray; font-size: 10pt;");
+    excludedLayout->addWidget(hintLabel);
+
+    m_excludedTable = new QTableWidget(m_excludedTab);
+    m_excludedTable->setColumnCount(1);
+    m_excludedTable->setHorizontalHeaderLabels(QStringList() << "扩展名");
+    m_excludedTable->horizontalHeader()->setStretchLastSection(true);
+    m_excludedTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_excludedTable->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+
+    excludedLayout->addWidget(m_excludedTable);
+
+    QHBoxLayout *excludedButtonsLayout = new QHBoxLayout();
+
+    m_addExcludedButton = new QPushButton("添加扩展名", m_excludedTab);
+    m_removeExcludedButton = new QPushButton("删除扩展名", m_excludedTab);
+
+    excludedButtonsLayout->addWidget(m_addExcludedButton);
+    excludedButtonsLayout->addWidget(m_removeExcludedButton);
+    excludedButtonsLayout->addStretch();
+
+    layout->addWidget(excludedGroup);
+    layout->addLayout(excludedButtonsLayout);
+
+    m_tabWidget->addTab(m_excludedTab, "排除");
+
+    connect(m_addExcludedButton, &QPushButton::clicked, this, &SettingsDialog::addExcludedExtension);
+    connect(m_removeExcludedButton, &QPushButton::clicked, this, &SettingsDialog::removeExcludedExtension);
+}
+
 void SettingsDialog::browseDownloadPath()
 {
     QString path = QFileDialog::getExistingDirectory(this, "选择下载文件夹", m_downloadPathEdit->text());
@@ -228,6 +272,32 @@ void SettingsDialog::removeRule()
     int currentRow = m_rulesTable->currentRow();
     if (currentRow >= 0) {
         m_rulesTable->removeRow(currentRow);
+        m_settingsChanged = true;
+    }
+}
+
+void SettingsDialog::addExcludedExtension()
+{
+    m_excludedTable->blockSignals(true);
+
+    int row = m_excludedTable->rowCount();
+    m_excludedTable->insertRow(row);
+
+    QTableWidgetItem *extItem = new QTableWidgetItem("");
+    m_excludedTable->setItem(row, 0, extItem);
+
+    m_excludedTable->blockSignals(false);
+
+    m_excludedTable->selectRow(row);
+    m_excludedTable->editItem(extItem);
+    m_settingsChanged = true;
+}
+
+void SettingsDialog::removeExcludedExtension()
+{
+    int currentRow = m_excludedTable->currentRow();
+    if (currentRow >= 0) {
+        m_excludedTable->removeRow(currentRow);
         m_settingsChanged = true;
     }
 }
@@ -352,6 +422,7 @@ void SettingsDialog::loadSettings()
     m_delaySpinBox->setValue(settings.value("organizeDelay", 5).toInt());
 
     updateRuleTable();
+    updateExcludedTable();
 }
 
 void SettingsDialog::saveSettings()
@@ -387,6 +458,19 @@ void SettingsDialog::saveSettings()
             m_fileOrganizer->addCustomRule(it.key(), it.value());
         }
         m_fileOrganizer->saveCustomRules();
+
+        // 保存排除扩展名
+        for (int row = 0; row < m_excludedTable->rowCount(); ++row) {
+            QTableWidgetItem *extItem = m_excludedTable->item(row, 0);
+
+            if (extItem && !extItem->text().isEmpty()) {
+                QString ext = extItem->text().toLower().trimmed();
+                if (ext.startsWith(".")) {
+                    ext = ext.mid(1);
+                }
+                m_fileOrganizer->addExcludedExtension(ext);
+            }
+        }
     }
 
     m_settingsChanged = false;
@@ -409,6 +493,24 @@ void SettingsDialog::updateRuleTable()
         }
 
         m_rulesTable->blockSignals(false);
+    }
+}
+
+void SettingsDialog::updateExcludedTable()
+{
+    m_excludedTable->setRowCount(0);
+
+    if (m_fileOrganizer) {
+        QStringList excluded = m_fileOrganizer->excludedExtensions();
+        m_excludedTable->blockSignals(true);
+
+        for (const QString &ext : excluded) {
+            int row = m_excludedTable->rowCount();
+            m_excludedTable->insertRow(row);
+            m_excludedTable->setItem(row, 0, new QTableWidgetItem(ext));
+        }
+
+        m_excludedTable->blockSignals(false);
     }
 }
 
