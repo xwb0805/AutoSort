@@ -2,6 +2,20 @@
 
 ## 方法一：从源代码编译
 
+### 快速编译（推荐）
+
+使用项目提供的编译脚本：
+
+```bash
+# 赋予执行权限
+chmod +x build_linux.sh
+
+# 运行编译脚本
+./build_linux.sh
+```
+
+### 手动编译
+
 ### 环境要求
 - CMake 3.16.0 或更高版本
 - Qt 6.x 开发库 (qt6-base-dev, qt6-base-dev-tools)
@@ -53,9 +67,21 @@ sudo make install
 ./AutoSort
 ```
 
-## 方法二：使用 AppImage（推荐）
+## 方法二：使用 Docker 编译（跨平台）
 
-下载 AppImage 文件后：
+如果你在 Windows 或 macOS 上，可以使用 Docker 编译 Linux 版本：
+
+```bash
+# 赋予执行权限
+chmod +x build_with_docker.sh
+
+# 运行 Docker 编译
+./build_with_docker.sh
+```
+
+编译完成后，输出文件在 `output/` 目录中。
+
+## 方法三：使用 AppImage（推荐）
 
 ```bash
 # 赋予执行权限
@@ -65,7 +91,7 @@ chmod +x AutoSort-x86_64.AppImage
 ./AutoSort-x86_64.AppImage
 ```
 
-## 方法三：使用 Snap
+## 方法四：使用 Snap
 
 ```bash
 # 安装
