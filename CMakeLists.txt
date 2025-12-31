@@ -14,12 +14,31 @@ set(SOURCES
     src/mainwindow.cpp
     src/fileorganizer.cpp
     src/settingsdialog.cpp
+    src/statistics.cpp
+    src/logmanager.cpp
+    src/filepreviewdialog.cpp
+    src/logviewerdialog.cpp
+    src/statisticsdialog.cpp
+    src/conflictresolutiondialog.cpp
+    src/filesearchdialog.cpp
+    src/batchrenamedialog.cpp
+    src/filefilterdialog.cpp
 )
 
 set(HEADERS
+    src/common.h
     src/mainwindow.h
     src/fileorganizer.h
     src/settingsdialog.h
+    src/statistics.h
+    src/logmanager.h
+    src/filepreviewdialog.h
+    src/logviewerdialog.h
+    src/statisticsdialog.h
+    src/conflictresolutiondialog.h
+    src/filesearchdialog.h
+    src/batchrenamedialog.h
+    src/filefilterdialog.h
 )
 
 qt_add_executable(AutoSort ${SOURCES} ${HEADERS})
@@ -28,6 +47,7 @@ qt_add_resources(AutoSort "resources"
     PREFIX "/"
     FILES
         "resources/icon.svg"
+        "resources/translations/autosort_en.ts"
 )
 
 target_link_libraries(AutoSort PRIVATE Qt6::Core Qt6::Widgets)

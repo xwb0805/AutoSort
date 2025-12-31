@@ -1,4 +1,5 @@
 #include "fileorganizer.h"
+#include "statistics.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -10,17 +11,23 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QCoreApplication>
+#include <QSettings>
 
 FileOrganizer::FileOrganizer(QObject *parent)
     : QObject(parent)
     , m_watcher(nullptr)
     , m_organizationTimer(nullptr)
     , m_isMonitoring(false)
+    , m_conflictAction(ConflictAction::Rename)
+    , m_statistics(nullptr)
 {
     m_watcher = new QFileSystemWatcher(this);
     m_organizationTimer = new QTimer(this);
     m_organizationTimer->setSingleShot(true);
     m_organizationTimer->setInterval(5000);
+
+    // 初始化监控路径列表
+    m_monitorPaths.clear();
 
     connect(m_watcher, &QFileSystemWatcher::directoryChanged, this, &FileOrganizer::onDirectoryChanged);
     connect(m_watcher, &QFileSystemWatcher::fileChanged, this, &FileOrganizer::onFileChanged);
@@ -77,6 +84,16 @@ void FileOrganizer::setDownloadPath(const QString &path)
 QString FileOrganizer::downloadPath() const
 {
     return m_downloadPath;
+}
+
+void FileOrganizer::setConflictAction(ConflictAction action)
+{
+    m_conflictAction = action;
+}
+
+ConflictAction FileOrganizer::conflictAction() const
+{
+    return m_conflictAction;
 }
 
 void FileOrganizer::initializeDefaultRules()
@@ -433,14 +450,21 @@ void FileOrganizer::startMonitoring()
         return;
     }
 
-    if (!m_watcher->addPath(m_downloadPath)) {
-        qWarning() << "Failed to watch directory:" << m_downloadPath;
-        return;
+    QStringList pathsToMonitor = m_monitorPaths.isEmpty() ? QStringList() << m_downloadPath : m_monitorPaths;
+
+    for (const QString &path : pathsToMonitor) {
+        if (!m_watcher->addPath(path)) {
+            qWarning() << "Failed to watch directory:" << path;
+        } else {
+            qDebug() << "Watching directory:" << path;
+        }
     }
 
-    m_isMonitoring = true;
-    emit monitoringStarted();
-    qDebug() << "Started monitoring:" << m_downloadPath;
+    if (!pathsToMonitor.isEmpty()) {
+        m_isMonitoring = true;
+        emit monitoringStarted();
+        qDebug() << "Started monitoring" << pathsToMonitor.size() << "directories";
+    }
 }
 
 void FileOrganizer::stopMonitoring()
@@ -449,10 +473,15 @@ void FileOrganizer::stopMonitoring()
         return;
     }
 
-    m_watcher->removePath(m_downloadPath);
+    QStringList pathsToMonitor = m_monitorPaths.isEmpty() ? QStringList() << m_downloadPath : m_monitorPaths;
+
+    for (const QString &path : pathsToMonitor) {
+        m_watcher->removePath(path);
+    }
+
     m_isMonitoring = false;
     emit monitoringStopped();
-    qDebug() << "Stopped monitoring:" << m_downloadPath;
+    qDebug() << "Stopped monitoring";
 }
 
 bool FileOrganizer::isMonitoring() const
@@ -479,106 +508,126 @@ void FileOrganizer::delayedOrganization()
 
 int FileOrganizer::organizeFiles()
 {
-    if (m_downloadPath.isEmpty()) {
-        qWarning() << "Download path is not set";
-        return 0;
-    }
+    qDebug() << "=== Starting file organization ===";
+    qDebug() << "Download path:" << m_downloadPath;
+    qDebug() << "Monitor paths:" << m_monitorPaths;
+    qDebug() << "Conflict action:" << static_cast<int>(m_conflictAction);
 
-    QDir downloadDir(m_downloadPath);
-    if (!downloadDir.exists()) {
-        qWarning() << "Download directory does not exist:" << m_downloadPath;
-        return 0;
-    }
-
-    // 处理文件
-    QStringList files = downloadDir.entryList(QDir::Files | QDir::NoDotAndDotDot);
+    QStringList pathsToMonitor = m_monitorPaths.isEmpty() ? QStringList() << m_downloadPath : m_monitorPaths;
     int organizedCount = 0;
 
-    for (const QString &fileName : files) {
-        QString filePath = m_downloadPath + "/" + fileName;
-
-        if (isTemporaryFile(fileName)) {
-            qDebug() << "Skipping temporary file:" << fileName;
+    for (const QString &downloadPath : pathsToMonitor) {
+        qDebug() << "Processing path:" << downloadPath;
+        if (downloadPath.isEmpty()) {
             continue;
         }
 
-        if (isFileLocked(filePath)) {
-            qDebug() << "File is locked (probably downloading):" << fileName;
+        QDir downloadDir(downloadPath);
+        if (!downloadDir.exists()) {
+            qWarning() << "Download directory does not exist:" << downloadPath;
             continue;
         }
 
-        QString extension = getFileExtension(fileName);
+        // 处理文件
+        QStringList files = downloadDir.entryList(QDir::Files | QDir::NoDotAndDotDot);
 
-        // 检查是否在排除列表中
-        if (!extension.isEmpty() && isExcludedExtension(extension)) {
-            qDebug() << "Skipping excluded extension:" << fileName;
-            continue;
-        }
-        QString targetFolder;
+        for (const QString &fileName : files) {
+            QString filePath = downloadPath + "/" + fileName;
 
-        if (extension.isEmpty()) {
-            qDebug() << "File has no extension, moving to Other folder:" << fileName;
-            targetFolder = "Other";
-        } else {
-            targetFolder = getTargetFolder(extension);
-            if (targetFolder.isEmpty()) {
-                qDebug() << "No rule for extension" << extension << "using Other folder";
+            if (isTemporaryFile(fileName)) {
+                qDebug() << "Skipping temporary file:" << fileName;
+                continue;
+            }
+
+            if (isFileLocked(filePath)) {
+                qDebug() << "File is locked (probably downloading):" << fileName;
+                continue;
+            }
+
+            QString extension = getFileExtension(fileName);
+
+            // 检查是否在排除列表中
+            if (!extension.isEmpty() && isExcludedExtension(extension)) {
+                qDebug() << "Skipping excluded extension:" << fileName;
+                continue;
+            }
+
+            QString targetFolder;
+
+            // 先尝试正则表达式匹配
+            QString regexFolder = matchRegexRule(fileName);
+            if (!regexFolder.isEmpty()) {
+                targetFolder = regexFolder;
+                qDebug() << "Matched regex rule for" << fileName << "->" << targetFolder;
+            } else if (extension.isEmpty()) {
+                qDebug() << "File has no extension, moving to Other folder:" << fileName;
                 targetFolder = "Other";
+            } else {
+                targetFolder = getTargetFolder(extension);
+                if (targetFolder.isEmpty()) {
+                    qDebug() << "No rule for extension" << extension << "using Other folder";
+                    targetFolder = "Other";
+                }
+            }
+
+            QString targetDirPath = downloadPath + "/" + targetFolder;
+            createFolderIfNotExists(targetDirPath);
+
+            QString targetFilePath = targetDirPath + "/" + fileName;
+
+            // 处理文件冲突
+            if (QFile::exists(targetFilePath)) {
+                QString finalTargetPath = handleConflict(filePath, targetFilePath);
+                if (finalTargetPath.isEmpty()) {
+                    qDebug() << "Skipped file due to conflict:" << fileName;
+                    continue;
+                }
+                targetFilePath = finalTargetPath;
+            }
+
+            if (moveFile(filePath, targetFilePath)) {
+                organizedCount++;
+                qDebug() << "Moved" << fileName << "to" << targetFolder;
+
+                // 记录统计信息
+                if (m_statistics) {
+                    QFileInfo fileInfo(targetFilePath);
+                    m_statistics->recordFileOrganized(extension, targetFolder, fileInfo.size());
+                }
+            } else {
+                qWarning() << "Failed to move" << fileName << "to" << targetFolder;
             }
         }
 
-        QString targetDirPath = m_downloadPath + "/" + targetFolder;
-        createFolderIfNotExists(targetDirPath);
+        // 处理文件夹：将非扩展名文件夹移动到 Folder 文件夹
+        QStringList folders = downloadDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &folderName : folders) {
+            QString folderPath = downloadPath + "/" + folderName;
 
-        QString targetFilePath = targetDirPath + "/" + fileName;
-        if (QFile::exists(targetFilePath)) {
-            QFileInfo fileInfo(filePath);
-            QString baseName = fileInfo.baseName();
-            QString suffix = fileInfo.suffix();
+            // 跳过扩展名文件夹和特殊文件夹
+            if (isExtensionFolder(folderName) || folderName == "Folder" || folderName == "Other") {
+                qDebug() << "Skipping extension or special folder:" << folderName;
+                continue;
+            }
 
-            int counter = 1;
-            do {
-                targetFilePath = targetDirPath + "/" + baseName + "_" + QString::number(counter) + "." + suffix;
-                counter++;
-            } while (QFile::exists(targetFilePath));
-        }
+            QString targetDirPath = downloadPath + "/Folder";
+            createFolderIfNotExists(targetDirPath);
 
-        if (moveFile(filePath, targetFilePath)) {
-            organizedCount++;
-            qDebug() << "Moved" << fileName << "to" << targetFolder;
-        } else {
-            qWarning() << "Failed to move" << fileName << "to" << targetFolder;
-        }
-    }
+            QString targetFolderPath = targetDirPath + "/" + folderName;
+            if (QDir(targetFolderPath).exists()) {
+                int counter = 1;
+                do {
+                    targetFolderPath = targetDirPath + "/" + folderName + "_" + QString::number(counter);
+                    counter++;
+                } while (QDir(targetFolderPath).exists());
+            }
 
-    // 处理文件夹：将非扩展名文件夹移动到 Folder 文件夹
-    QStringList folders = downloadDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QString &folderName : folders) {
-        QString folderPath = m_downloadPath + "/" + folderName;
-
-        // 跳过扩展名文件夹和特殊文件夹
-        if (isExtensionFolder(folderName) || folderName == "Folder" || folderName == "Other") {
-            qDebug() << "Skipping extension or special folder:" << folderName;
-            continue;
-        }
-
-        QString targetDirPath = m_downloadPath + "/Folder";
-        createFolderIfNotExists(targetDirPath);
-
-        QString targetFolderPath = targetDirPath + "/" + folderName;
-        if (QDir(targetFolderPath).exists()) {
-            int counter = 1;
-            do {
-                targetFolderPath = targetDirPath + "/" + folderName + "_" + QString::number(counter);
-                counter++;
-            } while (QDir(targetFolderPath).exists());
-        }
-
-        if (moveDirectory(folderPath, targetFolderPath)) {
-            organizedCount++;
-            qDebug() << "Moved folder" << folderName << "to Folder";
-        } else {
-            qWarning() << "Failed to move folder" << folderName;
+            if (moveDirectory(folderPath, targetFolderPath)) {
+                organizedCount++;
+                qDebug() << "Moved folder" << folderName << "to Folder";
+            } else {
+                qWarning() << "Failed to move folder" << folderName;
+            }
         }
     }
 
@@ -786,4 +835,163 @@ bool FileOrganizer::isExcludedExtension(const QString &extension) const
 {
     QString ext = extension.toLower();
     return m_excludedExtensions.contains(ext);
+}
+
+// 正则表达式匹配
+QString FileOrganizer::matchRegexRule(const QString &fileName) const
+{
+    for (auto it = m_regexRules.begin(); it != m_regexRules.end(); ++it) {
+        const QRegularExpression &regex = it.value();
+        QRegularExpressionMatch match = regex.match(fileName);
+        if (match.hasMatch()) {
+            // 如果正则表达式有捕获组，使用第一个捕获组作为文件夹名
+            if (match.capturedTexts().size() > 1) {
+                return match.captured(1);
+            }
+            // 否则返回空字符串，让调用者使用默认文件夹
+            return "";
+        }
+    }
+    return "";
+}
+
+// 冲突处理
+QString FileOrganizer::handleConflict(const QString &sourcePath, const QString &targetPath)
+{
+    switch (m_conflictAction) {
+        case ConflictAction::Overwrite:
+        case ConflictAction::OverwriteAll:
+            return targetPath;
+
+        case ConflictAction::Skip:
+        case ConflictAction::SkipAll:
+            return QString();
+
+        case ConflictAction::Rename: {
+            QFileInfo fileInfo(sourcePath);
+            QString baseName = fileInfo.baseName();
+            QString suffix = fileInfo.suffix();
+            QString targetDir = QFileInfo(targetPath).absolutePath();
+
+            int counter = 1;
+            QString newPath;
+            do {
+                newPath = targetDir + "/" + baseName + "_" + QString::number(counter);
+                if (!suffix.isEmpty()) {
+                    newPath += "." + suffix;
+                }
+                counter++;
+            } while (QFile::exists(newPath));
+
+            return newPath;
+        }
+
+        case ConflictAction::Ask:
+            emit fileConflict(sourcePath, targetPath);
+            return QString();  // 等待用户响应
+
+        default:
+            return QString();
+    }
+}
+
+// 多路径监控功能实现
+void FileOrganizer::addMonitorPath(const QString &path)
+{
+    if (!m_monitorPaths.contains(path)) {
+        m_monitorPaths.append(path);
+        m_watcher->addPath(path);
+    }
+}
+
+void FileOrganizer::removeMonitorPath(const QString &path)
+{
+    if (m_monitorPaths.contains(path)) {
+        m_monitorPaths.removeAll(path);
+        m_watcher->removePath(path);
+    }
+}
+
+QStringList FileOrganizer::monitorPaths() const
+{
+    return m_monitorPaths;
+}
+
+void FileOrganizer::setMonitorPaths(const QStringList &paths)
+{
+    // 移除旧路径
+    for (const QString &path : m_monitorPaths) {
+        m_watcher->removePath(path);
+    }
+    // 添加新路径
+    m_monitorPaths = paths;
+    for (const QString &path : m_monitorPaths) {
+        m_watcher->addPath(path);
+    }
+}
+
+// 正则表达式规则功能实现
+void FileOrganizer::addRegexRule(const QString &pattern, const QString &folder)
+{
+    QRegularExpression regex(pattern);
+    if (regex.isValid()) {
+        m_regexRules[pattern] = regex;
+        // 保存到配置
+        saveRegexRules();
+    }
+}
+
+void FileOrganizer::removeRegexRule(const QString &pattern)
+{
+    m_regexRules.remove(pattern);
+    saveRegexRules();
+}
+
+QMap<QString, QString> FileOrganizer::regexRules() const
+{
+    QMap<QString, QString> result;
+    for (auto it = m_regexRules.constBegin(); it != m_regexRules.constEnd(); ++it) {
+        result[it.key()] = "";  // 返回模式，文件夹需要单独获取
+    }
+    return result;
+}
+
+void FileOrganizer::loadRegexRules()
+{
+    QSettings settings;
+    m_regexRules.clear();
+
+    int count = settings.beginReadArray("regexRules");
+    for (int i = 0; i < count; ++i) {
+        settings.setArrayIndex(i);
+        QString pattern = settings.value("pattern").toString();
+        QString folder = settings.value("folder").toString();
+        if (!pattern.isEmpty()) {
+            QRegularExpression regex(pattern);
+            if (regex.isValid()) {
+                m_regexRules[pattern] = regex;
+            }
+        }
+    }
+    settings.endArray();
+}
+
+void FileOrganizer::saveRegexRules()
+{
+    QSettings settings;
+    settings.beginWriteArray("regexRules");
+
+    int index = 0;
+    for (auto it = m_regexRules.constBegin(); it != m_regexRules.constEnd(); ++it) {
+        settings.setArrayIndex(index++);
+        settings.setValue("pattern", it.key());
+        // 文件夹信息需要从其他地方获取，这里暂时只保存模式
+    }
+
+    settings.endArray();
+}
+
+void FileOrganizer::setStatistics(Statistics *statistics)
+{
+    m_statistics = statistics;
 }

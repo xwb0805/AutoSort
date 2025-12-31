@@ -22,6 +22,8 @@
 #include <QJsonArray>
 #include <QDir>
 #include <QStandardPaths>
+#include <QComboBox>
+#include <QListWidget>
 
 SettingsDialog::SettingsDialog(QWidget *parent, FileOrganizer *fileOrganizer)
     : QDialog(parent)
@@ -40,6 +42,7 @@ SettingsDialog::SettingsDialog(QWidget *parent, FileOrganizer *fileOrganizer)
     , m_startMinimizedCheckBox(nullptr)
     , m_delaySpinBox(nullptr)
     , m_enableNotificationsCheckBox(nullptr)
+    , m_languageComboBox(nullptr)
     , m_rulesTab(nullptr)
     , m_rulesTable(nullptr)
     , m_addRuleButton(nullptr)
@@ -51,12 +54,23 @@ SettingsDialog::SettingsDialog(QWidget *parent, FileOrganizer *fileOrganizer)
     , m_excludedTable(nullptr)
     , m_addExcludedButton(nullptr)
     , m_removeExcludedButton(nullptr)
+    , m_advancedTab(nullptr)
+    , m_monitorPathsList(nullptr)
+    , m_addPathButton(nullptr)
+    , m_removePathButton(nullptr)
+    , m_moveUpButton(nullptr)
+    , m_moveDownButton(nullptr)
+    , m_regexRulesTable(nullptr)
+    , m_addRegexButton(nullptr)
+    , m_removeRegexButton(nullptr)
+    , m_conflictActionCombo(nullptr)
+    , m_conflictAction(ConflictAction::Rename)
     , m_settingsChanged(false)
 {
     setupUI();
     loadSettings();
     setWindowTitle("设置");
-    setMinimumSize(600, 450);
+    setMinimumSize(700, 550);
 }
 
 SettingsDialog::~SettingsDialog()
@@ -71,6 +85,7 @@ void SettingsDialog::setupUI()
     setupGeneralTab();
     setupRulesTab();
     setupExcludedTab();
+    setupAdvancedTab();  // 添加高级选项卡
 
     m_mainLayout->addWidget(m_tabWidget);
 
@@ -140,6 +155,18 @@ void SettingsDialog::setupGeneralTab()
     delayLayout->addStretch();
 
     layout->addWidget(delayGroup);
+
+    QGroupBox *languageGroup = new QGroupBox("语言设置", m_generalTab);
+    QHBoxLayout *languageLayout = new QHBoxLayout(languageGroup);
+
+    languageLayout->addWidget(new QLabel("界面语言:", m_generalTab));
+    m_languageComboBox = new QComboBox(m_generalTab);
+    m_languageComboBox->addItem("简体中文", "zh_CN");
+    m_languageComboBox->addItem("English", "en_US");
+    languageLayout->addWidget(m_languageComboBox);
+    languageLayout->addStretch();
+
+    layout->addWidget(languageGroup);
 
     layout->addStretch();
 
@@ -421,6 +448,39 @@ void SettingsDialog::loadSettings()
     m_enableNotificationsCheckBox->setChecked(settings.value("enableNotifications", true).toBool());
     m_delaySpinBox->setValue(settings.value("organizeDelay", 5).toInt());
 
+    // 加载语言设置
+    QString language = settings.value("language", "zh_CN").toString();
+    int languageIndex = m_languageComboBox->findData(language);
+    if (languageIndex >= 0) {
+        m_languageComboBox->setCurrentIndex(languageIndex);
+    }
+
+    // 加载监控路径
+    m_monitorPaths = settings.value("monitorPaths", QStringList()).toStringList();
+    updateMonitorPathsList();
+
+    // 加载正则表达式规则
+    m_regexRules.clear();
+    int regexCount = settings.beginReadArray("regexRules");
+    for (int i = 0; i < regexCount; ++i) {
+        settings.setArrayIndex(i);
+        QString pattern = settings.value("pattern").toString();
+        QString folder = settings.value("folder").toString();
+        if (!pattern.isEmpty() && !folder.isEmpty()) {
+            m_regexRules[pattern] = folder;
+        }
+    }
+    settings.endArray();
+    updateRegexRulesTable();
+
+    // 加载冲突处理策略
+    int conflictActionValue = settings.value("conflictAction", static_cast<int>(ConflictAction::Rename)).toInt();
+    m_conflictAction = static_cast<ConflictAction>(conflictActionValue);
+    int conflictIndex = m_conflictActionCombo->findData(conflictActionValue);
+    if (conflictIndex >= 0) {
+        m_conflictActionCombo->setCurrentIndex(conflictIndex);
+    }
+
     updateRuleTable();
     updateExcludedTable();
 }
@@ -436,8 +496,58 @@ void SettingsDialog::saveSettings()
     settings.setValue("enableNotifications", m_enableNotificationsCheckBox->isChecked());
     settings.setValue("organizeDelay", m_delaySpinBox->value());
 
+    // 保存语言设置
+    settings.setValue("language", m_languageComboBox->currentData().toString());
+
+    // 保存监控路径
+    m_monitorPaths.clear();
+    for (int i = 0; i < m_monitorPathsList->count(); ++i) {
+        m_monitorPaths.append(m_monitorPathsList->item(i)->text());
+    }
+    settings.setValue("monitorPaths", m_monitorPaths);
+
+    // 保存正则表达式规则
+    m_regexRules.clear();
+    for (int row = 0; row < m_regexRulesTable->rowCount(); ++row) {
+        QTableWidgetItem *patternItem = m_regexRulesTable->item(row, 0);
+        QTableWidgetItem *folderItem = m_regexRulesTable->item(row, 1);
+
+        if (patternItem && folderItem && !patternItem->text().isEmpty() && !folderItem->text().isEmpty()) {
+            m_regexRules[patternItem->text()] = folderItem->text();
+        }
+    }
+    settings.beginWriteArray("regexRules");
+    int index = 0;
+    for (auto it = m_regexRules.begin(); it != m_regexRules.end(); ++it) {
+        settings.setArrayIndex(index++);
+        settings.setValue("pattern", it.key());
+        settings.setValue("folder", it.value());
+    }
+    settings.endArray();
+
+    // 保存冲突处理策略
+    settings.setValue("conflictAction", static_cast<int>(m_conflictAction));
+
     if (m_fileOrganizer) {
         m_fileOrganizer->setDownloadPath(m_downloadPathEdit->text());
+
+        // 设置监控路径
+        if (m_monitorPaths.isEmpty()) {
+            // 如果没有设置监控路径，使用主下载路径
+            m_fileOrganizer->setMonitorPaths(QStringList() << m_downloadPathEdit->text());
+        } else {
+            m_fileOrganizer->setMonitorPaths(m_monitorPaths);
+        }
+
+        // 设置冲突处理策略
+        m_fileOrganizer->setConflictAction(m_conflictAction);
+
+        // 设置正则表达式规则
+        m_fileOrganizer->loadRegexRules();
+        for (auto it = m_regexRules.begin(); it != m_regexRules.end(); ++it) {
+            m_fileOrganizer->addRegexRule(it.key(), it.value());
+        }
+        m_fileOrganizer->saveRegexRules();
 
         QMap<QString, QString> rules;
         for (int row = 0; row < m_rulesTable->rowCount(); ++row) {
@@ -529,4 +639,216 @@ bool SettingsDialog::validateSettings()
     }
 
     return true;
+}
+
+void SettingsDialog::setupAdvancedTab()
+{
+    m_advancedTab = new QWidget();
+    QVBoxLayout *layout = new QVBoxLayout(m_advancedTab);
+
+    // 多路径监控设置
+    QGroupBox *monitorPathsGroup = new QGroupBox("多路径监控", m_advancedTab);
+    QVBoxLayout *monitorPathsLayout = new QVBoxLayout(monitorPathsGroup);
+
+    QLabel *monitorPathsHint = new QLabel("添加要监控的多个文件夹路径，程序将同时监控这些文件夹。", m_advancedTab);
+    monitorPathsHint->setStyleSheet("color: gray; font-size: 10pt;");
+    monitorPathsLayout->addWidget(monitorPathsHint);
+
+    m_monitorPathsList = new QListWidget(m_advancedTab);
+    monitorPathsLayout->addWidget(m_monitorPathsList);
+
+    QHBoxLayout *monitorPathsButtonsLayout = new QHBoxLayout();
+
+    m_addPathButton = new QPushButton("添加路径", m_advancedTab);
+    m_removePathButton = new QPushButton("移除路径", m_advancedTab);
+    m_moveUpButton = new QPushButton("上移", m_advancedTab);
+    m_moveDownButton = new QPushButton("下移", m_advancedTab);
+
+    monitorPathsButtonsLayout->addWidget(m_addPathButton);
+    monitorPathsButtonsLayout->addWidget(m_removePathButton);
+    monitorPathsButtonsLayout->addWidget(m_moveUpButton);
+    monitorPathsButtonsLayout->addWidget(m_moveDownButton);
+    monitorPathsButtonsLayout->addStretch();
+
+    monitorPathsLayout->addLayout(monitorPathsButtonsLayout);
+    layout->addWidget(monitorPathsGroup);
+
+    // 正则表达式规则设置
+    QGroupBox *regexRulesGroup = new QGroupBox("正则表达式规则", m_advancedTab);
+    QVBoxLayout *regexRulesLayout = new QVBoxLayout(regexRulesGroup);
+
+    QLabel *regexHint = new QLabel("使用正则表达式匹配文件名，支持捕获组提取文件夹名称。", m_advancedTab);
+    regexHint->setStyleSheet("color: gray; font-size: 10pt;");
+    regexRulesLayout->addWidget(regexHint);
+
+    m_regexRulesTable = new QTableWidget(m_advancedTab);
+    m_regexRulesTable->setColumnCount(2);
+    m_regexRulesTable->setHorizontalHeaderLabels(QStringList() << "正则表达式" << "目标文件夹");
+    m_regexRulesTable->horizontalHeader()->setStretchLastSection(true);
+    m_regexRulesTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_regexRulesTable->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+
+    regexRulesLayout->addWidget(m_regexRulesTable);
+
+    QHBoxLayout *regexButtonsLayout = new QHBoxLayout();
+
+    m_addRegexButton = new QPushButton("添加规则", m_advancedTab);
+    m_removeRegexButton = new QPushButton("删除规则", m_advancedTab);
+
+    regexButtonsLayout->addWidget(m_addRegexButton);
+    regexButtonsLayout->addWidget(m_removeRegexButton);
+    regexButtonsLayout->addStretch();
+
+    regexRulesLayout->addLayout(regexButtonsLayout);
+    layout->addWidget(regexRulesGroup);
+
+    // 冲突处理策略设置
+    QGroupBox *conflictActionGroup = new QGroupBox("冲突处理策略", m_advancedTab);
+    QHBoxLayout *conflictActionLayout = new QHBoxLayout(conflictActionGroup);
+
+    conflictActionLayout->addWidget(new QLabel("默认处理方式:", m_advancedTab));
+    m_conflictActionCombo = new QComboBox(m_advancedTab);
+    m_conflictActionCombo->addItem("重命名文件", static_cast<int>(ConflictAction::Rename));
+    m_conflictActionCombo->addItem("覆盖文件", static_cast<int>(ConflictAction::Overwrite));
+    m_conflictActionCombo->addItem("跳过文件", static_cast<int>(ConflictAction::Skip));
+    m_conflictActionCombo->addItem("询问用户", static_cast<int>(ConflictAction::Ask));
+    m_conflictActionCombo->addItem("覆盖所有", static_cast<int>(ConflictAction::OverwriteAll));
+    m_conflictActionCombo->addItem("跳过所有", static_cast<int>(ConflictAction::SkipAll));
+    conflictActionLayout->addWidget(m_conflictActionCombo);
+    conflictActionLayout->addStretch();
+
+    layout->addWidget(conflictActionGroup);
+
+    layout->addStretch();
+
+    m_tabWidget->addTab(m_advancedTab, "高级");
+
+    // 连接信号
+    connect(m_addPathButton, &QPushButton::clicked, this, &SettingsDialog::addMonitorPath);
+    connect(m_removePathButton, &QPushButton::clicked, this, &SettingsDialog::removeMonitorPath);
+    connect(m_moveUpButton, &QPushButton::clicked, this, &SettingsDialog::moveMonitorPathUp);
+    connect(m_moveDownButton, &QPushButton::clicked, this, &SettingsDialog::moveMonitorPathDown);
+    connect(m_addRegexButton, &QPushButton::clicked, this, &SettingsDialog::addRegexRule);
+    connect(m_removeRegexButton, &QPushButton::clicked, this, &SettingsDialog::removeRegexRule);
+    connect(m_regexRulesTable, &QTableWidget::cellChanged, this, &SettingsDialog::onRegexRuleCellChanged);
+    connect(m_conflictActionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &SettingsDialog::onConflictActionChanged);
+}
+
+// 多路径监控功能实现
+void SettingsDialog::addMonitorPath()
+{
+    QString path = QFileDialog::getExistingDirectory(this, "选择监控文件夹");
+    if (!path.isEmpty() && !m_monitorPaths.contains(path)) {
+        m_monitorPaths.append(path);
+        m_monitorPathsList->addItem(path);
+        m_settingsChanged = true;
+    }
+}
+
+void SettingsDialog::removeMonitorPath()
+{
+    int currentRow = m_monitorPathsList->currentRow();
+    if (currentRow >= 0) {
+        m_monitorPaths.removeAt(currentRow);
+        m_monitorPathsList->takeItem(currentRow);
+        m_settingsChanged = true;
+    }
+}
+
+void SettingsDialog::moveMonitorPathUp()
+{
+    int currentRow = m_monitorPathsList->currentRow();
+    if (currentRow > 0) {
+        std::swap(m_monitorPaths[currentRow], m_monitorPaths[currentRow - 1]);
+        QListWidgetItem *item = m_monitorPathsList->takeItem(currentRow);
+        m_monitorPathsList->insertItem(currentRow - 1, item);
+        m_monitorPathsList->setCurrentRow(currentRow - 1);
+        m_settingsChanged = true;
+    }
+}
+
+void SettingsDialog::moveMonitorPathDown()
+{
+    int currentRow = m_monitorPathsList->currentRow();
+    if (currentRow >= 0 && currentRow < m_monitorPathsList->count() - 1) {
+        std::swap(m_monitorPaths[currentRow], m_monitorPaths[currentRow + 1]);
+        QListWidgetItem *item = m_monitorPathsList->takeItem(currentRow);
+        m_monitorPathsList->insertItem(currentRow + 1, item);
+        m_monitorPathsList->setCurrentRow(currentRow + 1);
+        m_settingsChanged = true;
+    }
+}
+
+// 正则表达式规则功能实现
+void SettingsDialog::addRegexRule()
+{
+    m_regexRulesTable->blockSignals(true);
+
+    int row = m_regexRulesTable->rowCount();
+    m_regexRulesTable->insertRow(row);
+
+    QTableWidgetItem *patternItem = new QTableWidgetItem("");
+    QTableWidgetItem *folderItem = new QTableWidgetItem("");
+
+    m_regexRulesTable->setItem(row, 0, patternItem);
+    m_regexRulesTable->setItem(row, 1, folderItem);
+
+    m_regexRulesTable->blockSignals(false);
+
+    m_regexRulesTable->selectRow(row);
+    m_regexRulesTable->editItem(patternItem);
+    m_settingsChanged = true;
+}
+
+void SettingsDialog::removeRegexRule()
+{
+    int currentRow = m_regexRulesTable->currentRow();
+    if (currentRow >= 0) {
+        m_regexRulesTable->removeRow(currentRow);
+        m_settingsChanged = true;
+    }
+}
+
+void SettingsDialog::onRegexRuleCellChanged(int row, int column)
+{
+    Q_UNUSED(row);
+    Q_UNUSED(column);
+    m_settingsChanged = true;
+}
+
+// 冲突处理策略功能实现
+void SettingsDialog::onConflictActionChanged(int index)
+{
+    m_conflictAction = static_cast<ConflictAction>(m_conflictActionCombo->itemData(index).toInt());
+    m_settingsChanged = true;
+}
+
+// 更新监控路径列表
+void SettingsDialog::updateMonitorPathsList()
+{
+    m_monitorPathsList->clear();
+    m_monitorPathsList->blockSignals(true);
+
+    for (const QString &path : m_monitorPaths) {
+        m_monitorPathsList->addItem(path);
+    }
+
+    m_monitorPathsList->blockSignals(false);
+}
+
+// 更新正则表达式规则表
+void SettingsDialog::updateRegexRulesTable()
+{
+    m_regexRulesTable->setRowCount(0);
+    m_regexRulesTable->blockSignals(true);
+
+    for (auto it = m_regexRules.begin(); it != m_regexRules.end(); ++it) {
+        int row = m_regexRulesTable->rowCount();
+        m_regexRulesTable->insertRow(row);
+        m_regexRulesTable->setItem(row, 0, new QTableWidgetItem(it.key()));
+        m_regexRulesTable->setItem(row, 1, new QTableWidgetItem(it.value()));
+    }
+
+    m_regexRulesTable->blockSignals(false);
 }
